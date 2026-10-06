@@ -1,5 +1,13 @@
 pipeline {
+
     agent any
+
+    environment {
+        IMAGE_NAME = 'jenkins-docker-cicd'
+        CONTAINER_NAME = 'jenkins-docker-cicd-app'
+        HOST_PORT = '5000'
+        CONTAINER_PORT = '5000'
+    }
 
     stages {
 
@@ -10,9 +18,21 @@ pipeline {
             }
         }
 
+        stage('Install Dependencies') {
+            steps {
+                echo 'Installing Python dependencies...'
+
+                sh '''
+                    python3 -m pip install --user --upgrade pip
+                    python3 -m pip install --user -r requirements.txt
+                '''
+            }
+        }
+
         stage('Test') {
             steps {
                 echo 'Running application tests...'
+
                 sh '''
                     python3 -m pytest -v
                 '''
@@ -21,29 +41,21 @@ pipeline {
 
         stage('Docker Build') {
             steps {
-                echo 'Building Docker images...'
+                echo 'Building Docker image...'
+
                 sh '''
-                    docker compose build
+                    docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} .
+                    docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
                 '''
             }
         }
 
         stage('Trivy Scan') {
             steps {
-                echo 'Scanning Docker images for vulnerabilities...'
+                echo 'Scanning Docker image for vulnerabilities...'
+
                 sh '''
-                    rm -f trivy-report.txt
-
-                    for image in $(docker compose config --images); do
-                        echo "========================================" >> trivy-report.txt
-                        echo "Scanning: $image" >> trivy-report.txt
-                        echo "========================================" >> trivy-report.txt
-
-                        trivy image --severity HIGH,CRITICAL "$image" \
-                            >> trivy-report.txt || true
-                    done
-
-                    echo "Trivy scan completed."
+                    trivy image --exit-code 0 --severity HIGH,CRITICAL ${IMAGE_NAME}:${BUILD_NUMBER}
                 '''
             }
         }
@@ -51,37 +63,28 @@ pipeline {
         stage('Deploy') {
             steps {
                 echo 'Deploying application using Docker Compose...'
+
                 sh '''
                     docker compose down || true
-                    docker compose up -d
+                    docker compose up -d --build
                 '''
             }
         }
 
         stage('Health Check') {
             steps {
-                echo 'Checking running containers...'
+                echo 'Checking application health...'
+
                 sh '''
-                    sleep 15
-
-                    echo "===== Docker Containers ====="
-                    docker compose ps
-
-                    echo "===== Application Health ====="
+                    sleep 10
                     curl -f http://localhost:5000/health
-
-                    echo ""
-                    echo "===== Database Health ====="
-                    curl -f http://localhost:5000/db-health
-
-                    echo ""
-                    echo "Health checks passed successfully."
                 '''
             }
         }
     }
 
     post {
+
         success {
             echo '========================================'
             echo 'CI/CD Pipeline completed successfully!'
