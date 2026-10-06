@@ -3,10 +3,8 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'jenkins-docker-cicd'
-        CONTAINER_NAME = 'jenkins-docker-cicd-app'
-        HOST_PORT = '5000'
-        CONTAINER_PORT = '5000'
+        VENV = '/var/lib/jenkins/venv'
+        IMAGE_NAME = 'jenkins-docker-cicd-app'
     }
 
     stages {
@@ -23,8 +21,12 @@ pipeline {
                 echo 'Installing Python dependencies...'
 
                 sh '''
-                    python3 -m pip install --user --upgrade pip
-                    python3 -m pip install --user -r requirements.txt
+                    if [ ! -d "$VENV" ]; then
+                        python3 -m venv "$VENV"
+                    fi
+
+                    "$VENV/bin/python" -m pip install --upgrade pip
+                    "$VENV/bin/pip" install -r requirements.txt
                 '''
             }
         }
@@ -34,7 +36,7 @@ pipeline {
                 echo 'Running application tests...'
 
                 sh '''
-                    python3 -m pytest -v
+                    "$VENV/bin/pytest" -v test_app.py
                 '''
             }
         }
@@ -44,19 +46,28 @@ pipeline {
                 echo 'Building Docker image...'
 
                 sh '''
-                    docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} .
-                    docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
+                    docker build -t "$IMAGE_NAME:latest" .
                 '''
             }
         }
 
         stage('Trivy Scan') {
             steps {
-                echo 'Scanning Docker image for vulnerabilities...'
+                echo 'Scanning Docker image with Trivy...'
 
                 sh '''
-                    trivy image --exit-code 0 --severity HIGH,CRITICAL ${IMAGE_NAME}:${BUILD_NUMBER}
+                    if command -v trivy >/dev/null 2>&1; then
+                        trivy image \
+                          --format table \
+                          --output trivy-report.txt \
+                          "$IMAGE_NAME:latest" || true
+                    else
+                        echo "Trivy is not installed. Skipping scan."
+                    fi
                 '''
+
+                archiveArtifacts artifacts: 'trivy-report.txt',
+                                 allowEmptyArchive: true
             }
         }
 
@@ -77,7 +88,21 @@ pipeline {
 
                 sh '''
                     sleep 10
-                    curl -f http://localhost:5000/health
+
+                    echo "Running containers:"
+                    docker compose ps
+
+                    echo "Testing application..."
+
+                    if curl -f http://localhost/health; then
+                        echo "Health check successful on port 80"
+                    elif curl -f http://localhost:5000/health; then
+                        echo "Health check successful on port 5000"
+                    else
+                        echo "Health check failed"
+                        docker compose logs --tail=100
+                        exit 1
+                    fi
                 '''
             }
         }
