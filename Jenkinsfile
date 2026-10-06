@@ -1,5 +1,4 @@
 pipeline {
-
     agent any
 
     environment {
@@ -19,7 +18,6 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 echo 'Installing Python dependencies...'
-
                 sh '''
                     if [ ! -d "$VENV" ]; then
                         python3 -m venv "$VENV"
@@ -34,7 +32,6 @@ pipeline {
         stage('Test') {
             steps {
                 echo 'Running application tests...'
-
                 sh '''
                     "$VENV/bin/pytest" -v test_app.py
                 '''
@@ -44,7 +41,6 @@ pipeline {
         stage('Docker Build') {
             steps {
                 echo 'Building Docker image...'
-
                 sh '''
                     docker build -t "$IMAGE_NAME:latest" .
                 '''
@@ -54,30 +50,24 @@ pipeline {
         stage('Trivy Scan') {
             steps {
                 echo 'Scanning Docker image with Trivy...'
-
                 sh '''
-                    if command -v trivy >/dev/null 2>&1; then
-                        trivy image \
-                          --format table \
-                          --output trivy-report.txt \
-                          "$IMAGE_NAME:latest" || true
-                    else
-                        echo "Trivy is not installed. Skipping scan."
-                    fi
+                    trivy image \
+                      --format table \
+                      --output trivy-report.txt \
+                      "$IMAGE_NAME:latest"
                 '''
 
                 archiveArtifacts artifacts: 'trivy-report.txt',
-                                 allowEmptyArchive: true
+                                  allowEmptyArchive: false
             }
         }
 
         stage('Deploy') {
             steps {
                 echo 'Deploying application using Docker Compose...'
-
                 sh '''
                     docker compose down || true
-                    docker compose up -d --build
+                    docker compose up -d
                 '''
             }
         }
@@ -85,7 +75,6 @@ pipeline {
         stage('Health Check') {
             steps {
                 echo 'Checking application health...'
-
                 sh '''
                     sleep 10
 
@@ -94,10 +83,10 @@ pipeline {
 
                     echo "Testing application..."
 
-                    if curl -f http://localhost/health; then
-                        echo "Health check successful on port 80"
-                    elif curl -f http://localhost:5000/health; then
+                    if curl -f http://localhost:5000/health; then
                         echo "Health check successful on port 5000"
+                    elif curl -f http://localhost/health; then
+                        echo "Health check successful on port 80"
                     else
                         echo "Health check failed"
                         docker compose logs --tail=100
@@ -106,10 +95,19 @@ pipeline {
                 '''
             }
         }
+
+        stage('Docker Cleanup') {
+            steps {
+                echo 'Cleaning unused Docker resources...'
+                sh '''
+                    docker container prune -f
+                    docker builder prune -f
+                '''
+            }
+        }
     }
 
     post {
-
         success {
             echo '========================================'
             echo 'CI/CD Pipeline completed successfully!'
