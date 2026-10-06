@@ -1,24 +1,28 @@
 services:
 
   app:
-    image: employee-app:1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jenkins-docker-cicd-app:latest
     container_name: employee-app
     ports:
       - "5000:5000"
-    environment:
-      DB_HOST: mysql
-      DB_USER: appuser
-      DB_PASSWORD: apppassword
-      DB_NAME: employee_db
     depends_on:
       mysql:
         condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: employee_db
+      DB_USER: appuser
+      DB_PASSWORD: apppassword
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 20s
 
   mysql:
     image: mysql:8.0
