@@ -5,48 +5,97 @@ pipeline {
 
         stage('Checkout') {
             steps {
+                echo 'Checking out source code from GitHub...'
                 checkout scm
             }
         }
 
         stage('Test') {
             steps {
-                bat 'python -m pytest test_app.py'
+                echo 'Running application tests...'
+                sh '''
+                    python3 -m pytest -v
+                '''
             }
         }
 
         stage('Docker Build') {
             steps {
-                bat 'docker build -t employee-app:jenkins .'
+                echo 'Building Docker images...'
+                sh '''
+                    docker compose build
+                '''
             }
         }
 
         stage('Trivy Scan') {
             steps {
-                bat 'docker run --rm -v "%cd%:/work" aquasec/trivy:latest image --format table employee-app:jenkins > trivy-jenkins-report.txt'
+                echo 'Scanning Docker images for vulnerabilities...'
+                sh '''
+                    rm -f trivy-report.txt
+
+                    for image in $(docker compose config --images); do
+                        echo "========================================" >> trivy-report.txt
+                        echo "Scanning: $image" >> trivy-report.txt
+                        echo "========================================" >> trivy-report.txt
+
+                        trivy image --severity HIGH,CRITICAL "$image" \
+                            >> trivy-report.txt || true
+                    done
+
+                    echo "Trivy scan completed."
+                '''
             }
         }
 
         stage('Deploy') {
             steps {
-                bat 'docker compose up -d'
+                echo 'Deploying application using Docker Compose...'
+                sh '''
+                    docker compose down || true
+                    docker compose up -d
+                '''
             }
         }
 
         stage('Health Check') {
             steps {
-                bat 'docker compose ps'
+                echo 'Checking running containers...'
+                sh '''
+                    sleep 15
+
+                    echo "===== Docker Containers ====="
+                    docker compose ps
+
+                    echo "===== Application Health ====="
+                    curl -f http://localhost:5000/health
+
+                    echo ""
+                    echo "===== Database Health ====="
+                    curl -f http://localhost:5000/db-health
+
+                    echo ""
+                    echo "Health checks passed successfully."
+                '''
             }
         }
     }
 
     post {
         success {
+            echo '========================================'
             echo 'CI/CD Pipeline completed successfully!'
+            echo '========================================'
         }
 
         failure {
+            echo '========================================'
             echo 'CI/CD Pipeline failed. Check the stage logs.'
+            echo '========================================'
+        }
+
+        always {
+            echo 'Pipeline execution completed.'
         }
     }
 }
