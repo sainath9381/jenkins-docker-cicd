@@ -1,12 +1,3 @@
-            echo 'CI/CD Pipeline failed. Check the stage logs.'
-            echo '========================================'
-        }
-
-        always {
-            echo 'Pipeline execution completed.'
-        }
-    }
-}
 pipeline {
     agent any
 
